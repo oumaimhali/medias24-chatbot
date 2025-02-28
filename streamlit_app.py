@@ -5,6 +5,7 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 import logging
+import urllib3
 
 # Chargement des variables d'environnement
 load_dotenv()
@@ -24,14 +25,28 @@ st.set_page_config(
 # Initialisation des clients
 @st.cache_resource
 def init_elasticsearch():
-    return Elasticsearch(
-        os.getenv('ELK_ENDPOINT'),
-        basic_auth=(os.getenv('ELK_USERNAME'), os.getenv('ELK_PASSWORD')),
-        verify_certs=False,
-        timeout=30,
-        max_retries=3,
-        retry_on_timeout=True
-    )
+    try:
+        es = Elasticsearch(
+            os.getenv('ELK_ENDPOINT'),
+            basic_auth=(os.getenv('ELK_USERNAME'), os.getenv('ELK_PASSWORD')),
+            verify_certs=False,
+            timeout=60,  # Augmenté à 60 secondes
+            max_retries=5,  # Augmenté à 5 tentatives
+            retry_on_timeout=True,
+            sniff_on_start=True,  # Découverte des nœuds au démarrage
+            sniff_timeout=60,  # Timeout pour la découverte des nœuds
+            sniff_on_connection_fail=True,  # Redécouverte en cas d'échec
+            connection_class=urllib3.connection.HTTPConnection  # Force HTTP
+        )
+        
+        # Test de connexion
+        if not es.ping():
+            raise ConnectionError("Impossible de se connecter à Elasticsearch")
+        return es
+    except Exception as e:
+        st.error(f"Erreur de connexion à Elasticsearch: {str(e)}")
+        logger.error(f"Erreur de connexion à Elasticsearch: {str(e)}")
+        return None
 
 @st.cache_resource
 def init_openai():
@@ -46,6 +61,10 @@ def search_articles(query, size=15, start_date=None, end_date=None):
     Recherche des articles dans Elasticsearch avec filtrage par date optionnel
     """
     try:
+        if es is None:
+            st.error("La connexion à Elasticsearch n'est pas disponible")
+            return []
+            
         # Construction de la requête
         search_query = {
             "bool": {
@@ -97,7 +116,8 @@ def search_articles(query, size=15, start_date=None, end_date=None):
                 "sort": [
                     {"post_date": {"order": "desc"}}
                 ]
-            }
+            },
+            request_timeout=30  # Timeout spécifique pour la recherche
         )
         
         articles = []
