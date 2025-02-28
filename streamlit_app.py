@@ -26,25 +26,42 @@ st.set_page_config(
 @st.cache_resource
 def init_elasticsearch():
     try:
+        # Afficher les informations de connexion (en masquant les informations sensibles)
+        endpoint = os.getenv('ELK_ENDPOINT')
+        username = os.getenv('ELK_USERNAME')
+        password = os.getenv('ELK_PASSWORD')
+        index = os.getenv('ELK_INDEX')
+
+        if not all([endpoint, username, password, index]):
+            st.error("Configuration Elasticsearch incomplète:")
+            if not endpoint: st.error("- ELK_ENDPOINT manquant")
+            if not username: st.error("- ELK_USERNAME manquant")
+            if not password: st.error("- ELK_PASSWORD manquant")
+            if not index: st.error("- ELK_INDEX manquant")
+            return None
+
+        st.info(f"Tentative de connexion à Elasticsearch sur : {endpoint}")
+        st.info(f"Index cible : {index}")
+
         es = Elasticsearch(
-            os.getenv('ELK_ENDPOINT'),
-            basic_auth=(os.getenv('ELK_USERNAME'), os.getenv('ELK_PASSWORD')),
+            endpoint,
+            basic_auth=(username, password),
             verify_certs=False,
-            timeout=60,  # Augmenté à 60 secondes
-            max_retries=5,  # Augmenté à 5 tentatives
+            timeout=60,
+            max_retries=5,
             retry_on_timeout=True,
-            sniff_on_start=True,  # Découverte des nœuds au démarrage
-            sniff_timeout=60,  # Timeout pour la découverte des nœuds
-            sniff_on_connection_fail=True,  # Redécouverte en cas d'échec
-            connection_class=urllib3.connection.HTTPConnection  # Force HTTP
+            connection_class=urllib3.connection.HTTPConnection
         )
         
         # Test de connexion
         if not es.ping():
+            st.error(f"Échec du ping vers {endpoint}")
             raise ConnectionError("Impossible de se connecter à Elasticsearch")
+            
+        st.success("✅ Connexion à Elasticsearch établie avec succès!")
         return es
     except Exception as e:
-        st.error(f"Erreur de connexion à Elasticsearch: {str(e)}")
+        st.error(f"Erreur détaillée de connexion à Elasticsearch: {str(e)}")
         logger.error(f"Erreur de connexion à Elasticsearch: {str(e)}")
         return None
 
@@ -54,7 +71,12 @@ def init_openai():
 
 # Initialisation des clients
 es = init_elasticsearch()
-init_openai()
+if es is None:
+    st.error("⚠️ L'application ne peut pas fonctionner sans connexion à Elasticsearch.")
+    st.info("Veuillez vérifier la configuration et réessayer.")
+    init_openai()
+else:
+    init_openai()
 
 def search_articles(query, size=15, start_date=None, end_date=None):
     """
@@ -222,6 +244,12 @@ def main():
     st.markdown("""
     Posez vos questions sur l'actualité marocaine et obtenez des réponses détaillées basées sur les articles de Medias24.
     """)
+
+    # Affichage des informations de configuration (masquées)
+    with st.expander("ℹ️ Informations de configuration"):
+        st.info(f"Endpoint: {os.getenv('ELK_ENDPOINT')}")
+        st.info(f"Index: {os.getenv('ELK_INDEX')}")
+        st.info(f"Username: {'*' * len(os.getenv('ELK_USERNAME', ''))}")
 
     # Sidebar pour les filtres
     with st.sidebar:
